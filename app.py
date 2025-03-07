@@ -8,20 +8,19 @@ import os
 import logging
 import random
 import gdown
-import uvicorn
-import joblib
-# For generating variable dummy predictions
 
-# Set up logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
-# Initialize FastAPI app
-app = FastAPI(title="Air Quality Prediction API",
-              description="API for predicting air quality based on environmental factors",
-              version="1.0.0")
+# Initialize FastAPI with metadata
+app = FastAPI(
+    title="Air Quality Prediction API",
+    description="API for predicting air quality based on environmental factors",
+    version="1.0.0"
+)
 
-# Add CORS middleware to allow requests from Streamlit
+# Set up CORS to allow requests from any origin (e.g., Streamlit apps)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,23 +29,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define directory for models
+# Define and ensure the existence of the models directory
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
-os.makedirs(MODELS_DIR, exist_ok=True)  # Create models directory if it doesn't exist
+os.makedirs(MODELS_DIR, exist_ok=True)
 
-
-# File ID from your Google Drive link
+# Download and load the model from Google Drive
 file_id = "1UiL9PPE8tJ_JnUQtzWd1MQ66Sn8dVGIG"
 output = "model.joblib"
-
-# Download the file
 gdown.download(f"https://drive.google.com/uc?id={file_id}", output, quiet=False)
-
-# Load the model
 model = joblib.load(output)
 print("Model loaded successfully!")
 
-# Try to load the model from different file formats
+# Attempt to reload the model using alternative file formats
 try:
     logger.info(f"Attempting to load model from: {model_path}")
     model = joblib.load(model_path)
@@ -61,7 +55,7 @@ except Exception as e:
         logger.error(f"Error loading model.pkl: {e_pkl}")
         logger.warning("No model loaded, will use dummy predictions")
 
-# Define input data model
+# Define the schema for incoming prediction requests
 class AirQualityInput(BaseModel):
     pm25: float
     pm10: float
@@ -88,38 +82,32 @@ class AirQualityInput(BaseModel):
             }
         }
 
-# Define AQI categories
+# Function to determine AQI category based on the AQI value
 def get_aqi_category(aqi_value):
     if aqi_value <= 50:
         return {"category": "Good", "color": "green", "description": "Air quality is satisfactory, and air pollution poses little or no risk."}
     elif aqi_value <= 100:
-        return {"category": "Moderate", "color": "yellow", "description": "Air quality is acceptable. However, there may be a risk for some people, particularly those who are unusually sensitive to air pollution."}
+        return {"category": "Moderate", "color": "yellow", "description": "Air quality is acceptable, though some sensitive individuals may experience minor effects."}
     elif aqi_value <= 150:
-        return {"category": "Unhealthy for Sensitive Groups", "color": "orange", "description": "Members of sensitive groups may experience health effects. The general public is less likely to be affected."}
+        return {"category": "Unhealthy for Sensitive Groups", "color": "orange", "description": "Sensitive groups may experience health effects; the general public is less affected."}
     elif aqi_value <= 200:
-        return {"category": "Unhealthy", "color": "red", "description": "Some members of the general public may experience health effects; members of sensitive groups may experience more serious health effects."}
+        return {"category": "Unhealthy", "color": "red", "description": "Some members of the general public may experience health effects; sensitive groups may face more severe effects."}
     elif aqi_value <= 300:
-        return {"category": "Very Unhealthy", "color": "purple", "description": "Health alert: The risk of health effects is increased for everyone."}
+        return {"category": "Very Unhealthy", "color": "purple", "description": "Health alert: Everyone may experience increased health risks."}
     else:
-        return {"category": "Hazardous", "color": "maroon", "description": "Health warning of emergency conditions: everyone is more likely to be affected."}
+        return {"category": "Hazardous", "color": "maroon", "description": "Emergency conditions: the entire population is at risk."}
 
-# Generate a more realistic dummy prediction based on input data
+# Generate a realistic dummy AQI prediction based on input data
 def generate_dummy_prediction(data):
-    # Create a weighted score based on input parameters
-    # Higher pollutant values lead to higher AQI, temperature and wind affect it
     weighted_score = (
         data.pm25 * 0.3 +
         data.pm10 * 0.2 +
         data.no2 * 0.15 +
         data.so2 * 0.1 +
-        data.co * 15 +  # CO is usually in ppm, so multiply for comparable scale
+        data.co * 15 +
         data.o3 * 0.15
     )
-    
-    # Add some random variation (±10%)
     variation = random.uniform(0.9, 1.1)
-    
-    # Adjust based on weather factors - lower temp and higher wind speed improve air quality
     weather_factor = 1.0
     if data.temperature < 20:
         weather_factor *= 0.9
@@ -131,28 +119,24 @@ def generate_dummy_prediction(data):
     elif data.wind_speed < 3:
         weather_factor *= 1.15
         
-    # Calculate final AQI - scale to reasonable AQI range
     aqi_value = min(300, max(30, weighted_score * variation * weather_factor))
-    
     return float(aqi_value)
 
+# Root endpoint for a welcome message
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Air Quality Prediction API"}
 
+# Endpoint for making predictions
 @app.post("/predict/")
 def predict_air_quality(data: AirQualityInput):
-    # Log the received data for debugging
     logger.info(f"Received prediction request with data: {data.dict()}")
     
     if model is None:
-        # If model is not available, return a dynamic dummy prediction based on input
         logger.warning("Model not loaded, returning dynamic dummy prediction")
         aqi_value = generate_dummy_prediction(data)
         category_info = get_aqi_category(aqi_value)
-        
         logger.info(f"Generated dummy prediction: {aqi_value:.2f}")
-        
         return {
             "predicted_aqi": aqi_value,
             "category": category_info["category"],
@@ -162,7 +146,6 @@ def predict_air_quality(data: AirQualityInput):
         }
     
     try:
-        # Convert input data to DataFrame (match the format expected by your model)
         input_data = pd.DataFrame({
             'PM2.5': [data.pm25],
             'PM10': [data.pm10],
@@ -174,18 +157,11 @@ def predict_air_quality(data: AirQualityInput):
             'Humidity': [data.humidity],
             'Wind_speed': [data.wind_speed]
         })
-        
         logger.info(f"Prepared input data for model: {input_data.to_dict()}")
-        
-        # Make prediction
         prediction = model.predict(input_data)[0]
-        aqi_value = float(prediction)  # Convert numpy type to native Python type
-        
+        aqi_value = float(prediction)
         logger.info(f"Model predicted AQI: {aqi_value}")
-        
-        # Get AQI category
         category_info = get_aqi_category(aqi_value)
-        
         return {
             "predicted_aqi": aqi_value,
             "category": category_info["category"],
@@ -194,12 +170,9 @@ def predict_air_quality(data: AirQualityInput):
         }
     except Exception as e:
         logger.error(f"Prediction error: {e}")
-        # Fall back to dummy prediction on error
         aqi_value = generate_dummy_prediction(data)
         category_info = get_aqi_category(aqi_value)
-        
         logger.info(f"Falling back to dummy prediction: {aqi_value:.2f}")
-        
         return {
             "predicted_aqi": aqi_value,
             "category": category_info["category"],
@@ -208,11 +181,9 @@ def predict_air_quality(data: AirQualityInput):
             "note": f"Error occurred during prediction: {str(e)}. Using fallback prediction."
         }
 
-# Sample historical data endpoint
+# Endpoint returning sample historical data
 @app.get("/historical-data/")
 def get_historical_data():
-    # In a real application, this would fetch data from a database
-    # For demo purposes, we'll return some sample data
     return {
         "dates": ["2023-01-01", "2023-01-02", "2023-01-03", "2023-01-04", "2023-01-05", 
                   "2023-01-06", "2023-01-07", "2023-01-08", "2023-01-09", "2023-01-10"],
@@ -221,10 +192,9 @@ def get_historical_data():
         "pm10_values": [30, 45, 60, 40, 70, 85, 55, 30, 50, 40],
     }
 
-# Model performance metrics endpoint
+# Endpoint returning model performance metrics
 @app.get("/model-performance/")
 def get_model_performance():
-    # In a real application, these would be actual metrics from your model evaluation
     return {
         "mse": 15.23,
         "rmse": 3.90,
@@ -243,9 +213,7 @@ def get_model_performance():
         }
     }
 
-
-
+# Start the application with Uvicorn
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
