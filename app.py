@@ -9,8 +9,6 @@ import logging
 import random
 import gdown
 import uvicorn
-from app import app
-
 import joblib
 # For generating variable dummy predictions
 
